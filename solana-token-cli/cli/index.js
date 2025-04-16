@@ -1,4 +1,5 @@
-import { getTokenInfo } from './fetch-info.js';
+import { getTokenInfo as getNewTokenInfo } from './fetch-info.js';
+import { getTokenInfo as getExistingTokenInfo } from './get-token-info.js';
 import { createToken } from './token-utils.js';
 import { addLiquidity } from './raydium-utils.js';
 import fs from 'fs';
@@ -47,13 +48,27 @@ async function main() {
   try {
     // Check for command line arguments
     const args = process.argv.slice(2);
-    let tokenInfo;
-
+    
     if (args.includes('--help') || args.includes('-h')) {
       printHelp();
       return;
     }
+    
+    // Check if we're in token info retrieval mode
+    if (args.includes('info')) {
+      await handleTokenInfo(args);
+      return;
+    }
+    
+    // Check if we're in token list mode
+    if (args.includes('list')) {
+      await handleTokenList();
+      return;
+    }
 
+    // Continue with token creation flow
+    let tokenInfo;
+    
     // Check if we're in simulation mode
     const simulationMode = args.includes('--simulate') || args.includes('-s');
     if (simulationMode) {
@@ -80,7 +95,7 @@ async function main() {
     // If no config file or it failed to load, use interactive mode
     if (!tokenInfo) {
       console.log(chalk.blue("🔍 Please provide details for your new token:"));
-      tokenInfo = await getTokenInfo();
+      tokenInfo = await getNewTokenInfo();
       
       if (!tokenInfo.name) {
         console.log(chalk.yellow("Token creation cancelled."));
@@ -186,6 +201,109 @@ async function main() {
   }
 }
 
+async function handleTokenInfo(args) {
+  const mintIndex = args.indexOf('info') + 1;
+  
+  if (args.length <= mintIndex) {
+    console.error(chalk.red("❌ Please provide a token mint address."));
+    console.log(chalk.blue("Usage: node index.js info <MINT_ADDRESS>"));
+    return;
+  }
+  
+  const mintAddress = args[mintIndex];
+  console.log(chalk.blue(`🔍 Looking up token information for: ${chalk.cyan(mintAddress)}`));
+  
+  try {
+    const tokenInfo = await getExistingTokenInfo(mintAddress, true);
+    
+    if (!tokenInfo.exists) {
+      console.error(chalk.red(`\n❌ Token not found: ${mintAddress}`));
+      return;
+    }
+    
+    // Print summary
+    console.log(chalk.bold.green("\n📊 Token Summary:"));
+    if (tokenInfo.metadata && tokenInfo.metadata.name) {
+      console.log(chalk.white(`• Name: ${chalk.cyan(tokenInfo.metadata.name)} (${chalk.cyan(tokenInfo.metadata.symbol)})`));
+    } else {
+      console.log(chalk.white(`• Mint: ${chalk.cyan(tokenInfo.mint)}`));
+    }
+    console.log(chalk.white(`• Total Supply: ${chalk.cyan(tokenInfo.supply)}`));
+    console.log(chalk.white(`• Decimals: ${chalk.cyan(tokenInfo.decimals)}`));
+    console.log(chalk.white(`• Your Balance: ${chalk.cyan(tokenInfo.userBalance || 0)}`));
+    
+    // Explorer links
+    console.log(chalk.bold.blue("\n🔗 Links:"));
+    console.log(chalk.white(`• Explorer: ${chalk.cyan(tokenInfo.urls.explorer)}`));
+    
+    // Save to file option
+    if (args.includes('--save')) {
+      const outputDir = './token-outputs';
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir);
+      }
+      
+      const symbol = tokenInfo.metadata?.symbol || 'unknown';
+      const outputFile = path.join(outputDir, `${symbol.toLowerCase()}-info-${Date.now()}.json`);
+      fs.writeFileSync(outputFile, JSON.stringify(tokenInfo, null, 2));
+      console.log(chalk.white(`\n💾 Token details saved to: ${chalk.cyan(outputFile)}`));
+    }
+  } catch (error) {
+    console.error(chalk.red(`\n❌ Error looking up token: ${error.message}`));
+  }
+}
+
+async function handleTokenList() {
+  console.log(chalk.blue("📋 Listing your tokens..."));
+  
+  // Check token-outputs directory for previously created tokens
+  const outputDir = './token-outputs';
+  let savedTokens = [];
+  
+  if (fs.existsSync(outputDir)) {
+    const files = fs.readdirSync(outputDir);
+    for (const file of files) {
+      if (file.endsWith('.json')) {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(outputDir, file), 'utf8'));
+          if (data.mint) {
+            savedTokens.push({
+              name: data.name || 'Unknown',
+              symbol: data.symbol || 'Unknown',
+              mint: data.mint,
+              createdAt: data.createdAt || 'Unknown',
+              file
+            });
+          }
+        } catch (err) {
+          // Skip invalid files
+        }
+      }
+    }
+  }
+  
+  if (savedTokens.length > 0) {
+    console.log(chalk.green(`\n🪙 Found ${savedTokens.length} tokens in your output directory:`));
+    
+    savedTokens.sort((a, b) => {
+      // Sort by creation date, newest first
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    
+    for (let i = 0; i < savedTokens.length; i++) {
+      const token = savedTokens[i];
+      console.log(chalk.white(`\n${i + 1}. ${chalk.cyan(token.name)} (${chalk.cyan(token.symbol)})`));
+      console.log(chalk.white(`   Mint: ${chalk.cyan(token.mint)}`));
+      console.log(chalk.white(`   Created: ${chalk.cyan(new Date(token.createdAt).toLocaleString())}`));
+      console.log(chalk.white(`   File: ${chalk.cyan(token.file)}`));
+      console.log(chalk.white(`   Explorer: ${chalk.cyan(`https://explorer.solana.com/address/${token.mint}?cluster=${NETWORK}`)}`));
+    }
+  } else {
+    console.log(chalk.yellow("\n⚠️ No saved tokens found in the token-outputs directory."));
+    console.log(chalk.yellow("  Create a token first or manually add token data files to the directory."));
+  }
+}
+
 async function getConfirmation() {
   const prompts = (await import('prompts')).default;
   return prompts({
@@ -200,8 +318,11 @@ function printHelp() {
   console.log(chalk.bold.cyan("Solana Token Deployer CLI Help:"));
   console.log(chalk.cyan("=================================\n"));
   console.log(chalk.white("Usage:"));
-  console.log(chalk.cyan("  node index.js [options]\n"));
-  console.log(chalk.white("Options:"));
+  console.log(chalk.cyan("  node index.js [options]") + chalk.white("           Create a new token"));
+  console.log(chalk.cyan("  node index.js info <address> [--save]") + chalk.white(" Get information about an existing token"));
+  console.log(chalk.cyan("  node index.js list") + chalk.white("                List your previously created tokens\n"));
+  
+  console.log(chalk.white("Options for token creation:"));
   console.log(chalk.cyan("  --help, -h          ") + chalk.white("Show this help message"));
   console.log(chalk.cyan("  --config <file>     ") + chalk.white("Specify a JSON configuration file with token details"));
   console.log(chalk.cyan("  --yes, -y           ") + chalk.white("Skip confirmation prompts"));
