@@ -5,6 +5,25 @@ import chalk from 'chalk';
 
 const TOKEN_METADATA_PROGRAM_ID = new web3.PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
+// Hardcoded metadata for well-known tokens
+const KNOWN_TOKENS = {
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { 
+    name: 'USD Coin', 
+    symbol: 'USDC',
+    logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png'
+  },
+  'So11111111111111111111111111111111111111112': {
+    name: 'Wrapped SOL',
+    symbol: 'wSOL',
+    logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png'
+  },
+  'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': {
+    name: 'Bonk',
+    symbol: 'BONK',
+    logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263/logo.png'
+  }
+};
+
 /**
  * Get detailed information about a token by its mint address
  * @param {string} mintAddress - The mint address of the token
@@ -29,7 +48,7 @@ export async function getTokenInfo(mintAddress, verbose = false) {
       console.log(chalk.white(`• Freeze Authority: ${chalk.cyan(mintInfo.freezeAuthority?.toBase58() || 'None')}`));
     }
     
-    // Try to get token metadata
+    // Generate the metadata PDA (Program Derived Address)
     const [metadataPDA] = web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from('metadata'),
@@ -39,42 +58,114 @@ export async function getTokenInfo(mintAddress, verbose = false) {
       TOKEN_METADATA_PROGRAM_ID
     );
     
+    // Check if this is a known token
     let metadata = null;
     let metadataExists = false;
+    const knownToken = KNOWN_TOKENS[mintAddress];
     
-    try {
-      const metadataAccount = await connection.getAccountInfo(metadataPDA);
-      metadataExists = metadataAccount !== null;
+    if (knownToken) {
+      metadata = {
+        name: knownToken.name,
+        symbol: knownToken.symbol,
+        uri: knownToken.logoURI || ''
+      };
+      metadataExists = true;
       
-      if (metadataExists && metadataAccount.data.length > 0) {
-        // Simple parsing of metadata (this is a simplification)
-        // In a production app, you'd use Metaplex JS SDK
-        const data = metadataAccount.data;
-        
-        // Skip first byte which is a version number
-        let nameLength = data[1];
-        let nameEnd = 1 + nameLength + 1;
-        const name = data.slice(2, nameEnd).toString('utf8').replace(/\u0000/g, '');
-        
-        let symbolLength = data[nameEnd];
-        let symbolEnd = nameEnd + 1 + symbolLength;
-        const symbol = data.slice(nameEnd + 1, symbolEnd).toString('utf8').replace(/\u0000/g, '');
-        
-        let uriLength = data[symbolEnd];
-        let uriEnd = symbolEnd + 1 + uriLength;
-        const uri = data.slice(symbolEnd + 1, uriEnd).toString('utf8').replace(/\u0000/g, '');
-        
-        metadata = { name, symbol, uri };
-        
-        if (verbose) {
-          console.log(chalk.green(`\n📋 Token Metadata:`));
-          console.log(chalk.white(`• Name: ${chalk.cyan(name)}`));
-          console.log(chalk.white(`• Symbol: ${chalk.cyan(symbol)}`));
-          console.log(chalk.white(`• URI: ${chalk.cyan(uri || 'None')}`));
-        }
+      if (verbose) {
+        console.log(chalk.green(`\n📋 Token Metadata (from known token list):`));
+        console.log(chalk.white(`• Name: ${chalk.cyan(knownToken.name)}`));
+        console.log(chalk.white(`• Symbol: ${chalk.cyan(knownToken.symbol)}`));
+        console.log(chalk.white(`• Logo: ${chalk.cyan(knownToken.logoURI || 'None')}`));
       }
-    } catch (err) {
-      if (verbose) console.log(chalk.yellow(`⚠️ Error fetching metadata: ${err.message}`));
+    } else {
+      // Try to get token metadata from on-chain program
+      try {
+        const metadataAccount = await connection.getAccountInfo(metadataPDA);
+        metadataExists = metadataAccount !== null;
+        
+        if (metadataExists && metadataAccount.data.length > 0) {
+          // Better parsing of metadata using a more robust approach
+          const metadataData = metadataAccount.data;
+          
+          // Skip header bytes (1-byte version and fixed values)
+          const nameStart = 1;
+          
+          // Find length of name (indicated by first byte after header)
+          const nameLength = metadataData[nameStart];
+          
+          // Read name
+          let nameEnd = nameStart + 1 + nameLength;
+          try {
+            const name = metadataData.slice(nameStart + 1, nameEnd)
+              .toString('utf8')
+              .replace(/\u0000/g, '');
+            
+            // Find length of symbol (indicated by next byte)
+            const symbolLength = metadataData[nameEnd];
+            
+            // Read symbol
+            let symbolEnd = nameEnd + 1 + symbolLength;
+            const symbol = metadataData.slice(nameEnd + 1, symbolEnd)
+              .toString('utf8')
+              .replace(/\u0000/g, '');
+            
+            // Find length of URI (indicated by next byte)
+            const uriLength = metadataData[symbolEnd];
+            
+            // Read URI
+            let uriEnd = symbolEnd + 1 + uriLength;
+            const uri = metadataData.slice(symbolEnd + 1, uriEnd)
+              .toString('utf8')
+              .replace(/\u0000/g, '');
+            
+            metadata = { name, symbol, uri };
+            
+            if (verbose) {
+              console.log(chalk.green(`\n📋 Token Metadata:`));
+              console.log(chalk.white(`• Name: ${chalk.cyan(name)}`));
+              console.log(chalk.white(`• Symbol: ${chalk.cyan(symbol)}`));
+              console.log(chalk.white(`• URI: ${chalk.cyan(uri || 'None')}`));
+            }
+          } catch (error) {
+            // If there's an error parsing metadata, try a simpler approach
+            if (verbose) {
+              console.log(chalk.yellow(`⚠️ Error parsing metadata format, trying simpler approach...`));
+            }
+            
+            try {
+              // Find first null byte after position 5 to get name string
+              let pos = 5;
+              while (pos < metadataData.length && metadataData[pos] !== 0) pos++;
+              
+              const name = metadataData.slice(5, pos).toString('utf8');
+              
+              // Skip null bytes
+              pos++;
+              while (pos < metadataData.length && metadataData[pos] === 0) pos++;
+              
+              // Find end of symbol string
+              const symbolStart = pos;
+              while (pos < metadataData.length && metadataData[pos] !== 0) pos++;
+              
+              const symbol = metadataData.slice(symbolStart, pos).toString('utf8');
+              
+              metadata = { name, symbol, uri: '' };
+              
+              if (verbose) {
+                console.log(chalk.green(`\n📋 Token Metadata (simplified parsing):`));
+                console.log(chalk.white(`• Name: ${chalk.cyan(name)}`));
+                console.log(chalk.white(`• Symbol: ${chalk.cyan(symbol)}`));
+              }
+            } catch (innerError) {
+              if (verbose) {
+                console.log(chalk.yellow(`⚠️ Could not parse metadata: ${innerError.message}`));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (verbose) console.log(chalk.yellow(`⚠️ Error fetching metadata: ${err.message}`));
+      }
     }
     
     // Get token accounts by owner

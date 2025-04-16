@@ -1,5 +1,10 @@
 import { connection, loadWallet, getExplorerUrl } from './config.js';
 import * as web3 from '@solana/web3.js';
+import { Metaplex } from '@metaplex-foundation/js';
+
+// Import Metaplex token metadata module using CommonJS workaround
+import pkg from '@metaplex-foundation/mpl-token-metadata';
+const { createCreateMetadataAccountV3Instruction } = pkg;
 
 // Constants
 const TOKEN_METADATA_PROGRAM_ID = new web3.PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
@@ -31,9 +36,9 @@ export async function createTokenMetadata(tokenInfo, mint, simulate = false) {
     if (telegramUrl) console.log(`Telegram: t.me/${telegramUrl}`);
     
     const wallet = loadWallet();
-    
-    // Generate the metadata PDA manually
     const mintPublicKey = new web3.PublicKey(mint);
+    
+    // Generate the metadata PDA (Program Derived Address)
     const [metadataPDA] = web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from('metadata'),
@@ -45,52 +50,76 @@ export async function createTokenMetadata(tokenInfo, mint, simulate = false) {
     
     console.log(`Metadata PDA: ${metadataPDA.toBase58()}`);
     
-    // Simplified metadata approach - just using essential fields
-    // This is more likely to work with current Metaplex Token Metadata Program
+    // Create URI with metadata including image and social links
+    let metadataUri = '';
     
-    // Create a simple metadata structure
-    const metadataData = {
-      name,
-      symbol,
-      uri: '', // Empty URI is safer if we don't have a proper JSON metadata URL
+    // Only create a metadata URI if we have an image or social links
+    if (imageUrl || twitterUrl || telegramUrl) {
+      // Create a standard token metadata JSON object
+      const metadataJson = {
+        name: name,
+        symbol: symbol,
+        description: `${name} (${symbol}) SPL Token`,
+        image: imageUrl || '',
+        external_url: '',
+        attributes: []
+      };
+      
+      // Add social links as attributes and external_url
+      if (twitterUrl) {
+        metadataJson.external_url = `https://twitter.com/${twitterUrl}`;
+        metadataJson.attributes.push({
+          trait_type: 'Twitter',
+          value: `@${twitterUrl}`
+        });
+      }
+      
+      if (telegramUrl) {
+        if (!metadataJson.external_url) {
+          metadataJson.external_url = `https://t.me/${telegramUrl}`;
+        }
+        metadataJson.attributes.push({
+          trait_type: 'Telegram',
+          value: `t.me/${telegramUrl}`
+        });
+      }
+      
+      // Store the JSON as a base64-encoded data URI for immediate availability
+      metadataUri = `data:application/json;base64,${Buffer.from(JSON.stringify(metadataJson)).toString('base64')}`;
+    }
+    
+    // Create the DataV2 structure required by the token metadata program
+    const dataV2 = {
+      name: name,
+      symbol: symbol,
+      uri: metadataUri,
       sellerFeeBasisPoints: 0,
       creators: null,
       collection: null,
       uses: null
     };
     
-    // Serialize the metadata for the instruction
-    const metadataArgsBuffer = Buffer.from(JSON.stringify({
-      name,
-      symbol,
-      uri: '',
-      sellerFeeBasisPoints: 0,
-      creators: null,
-      collection: null,
-      uses: null,
-      isMutable: true
-    }));
+    // Create the accounts structure for the CreateMetadataAccountV3 instruction
+    const accounts = {
+      metadata: metadataPDA,
+      mint: mintPublicKey,
+      mintAuthority: wallet.publicKey,
+      payer: wallet.publicKey,
+      updateAuthority: wallet.publicKey,
+    };
     
-    // Create metadata transaction with CreateMetadataAccountV3 instruction
-    // Simplified instruction data - just using the essential fields
-    const createMetadataInstruction = new web3.TransactionInstruction({
-      keys: [
-        { pubkey: metadataPDA, isSigner: false, isWritable: true },
-        { pubkey: mintPublicKey, isSigner: false, isWritable: false },
-        { pubkey: wallet.publicKey, isSigner: true, isWritable: false }, // mint authority
-        { pubkey: wallet.publicKey, isSigner: true, isWritable: true }, // payer
-        { pubkey: wallet.publicKey, isSigner: false, isWritable: false }, // update authority
-        { pubkey: web3.SystemProgram.programId, isSigner: false, isWritable: false }
-      ],
-      programId: TOKEN_METADATA_PROGRAM_ID,
-      data: Buffer.concat([
-        Buffer.from([16]), // 16 = CreateMetadataAccountV3 instruction
-        metadataArgsBuffer,
-      ])
-    });
+    // Create the instruction using Metaplex helper
+    const instruction = createCreateMetadataAccountV3Instruction(
+      accounts,
+      {
+        data: dataV2,
+        isMutable: true,
+        collectionDetails: null
+      }
+    );
     
     // Create transaction
-    const transaction = new web3.Transaction().add(createMetadataInstruction);
+    const transaction = new web3.Transaction().add(instruction);
     
     // Set transaction options
     transaction.feePayer = wallet.publicKey;
@@ -102,7 +131,7 @@ export async function createTokenMetadata(tokenInfo, mint, simulate = false) {
     
     console.log('Sending metadata transaction...');
     const signature = await connection.sendRawTransaction(transaction.serialize(), {
-      skipPreflight: true, // Skip preflight to avoid metadata parsing issues
+      skipPreflight: false,
       preflightCommitment: 'confirmed',
     });
     
@@ -111,17 +140,12 @@ export async function createTokenMetadata(tokenInfo, mint, simulate = false) {
       blockhash: latestBlockhash.blockhash,
       lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
       signature,
-    });
+    }, 'confirmed');
     
     console.log(`✅ Token metadata created successfully!`);
     console.log(`Transaction ID: ${signature}`);
     console.log(`Transaction URL: ${getExplorerUrl(signature, 'tx')}`);
     
-    // After successful metadata creation, we'll store the social info separately
-    // This is a workaround since we can't reliably store it directly in the on-chain metadata
-    
-    // In a production app, you would store this information in a proper database
-    // For now, we'll just return it so it's saved in the token-outputs JSON file
     return {
       success: true,
       signature,

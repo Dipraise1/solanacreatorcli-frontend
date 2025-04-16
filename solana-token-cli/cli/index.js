@@ -223,18 +223,45 @@ async function handleTokenInfo(args) {
     
     // Print summary
     console.log(chalk.bold.green("\n📊 Token Summary:"));
-    if (tokenInfo.metadata && tokenInfo.metadata.name) {
-      console.log(chalk.white(`• Name: ${chalk.cyan(tokenInfo.metadata.name)} (${chalk.cyan(tokenInfo.metadata.symbol)})`));
+    
+    // Name & Symbol Display
+    if (tokenInfo.metadata && tokenInfo.metadata.name && tokenInfo.metadata.symbol) {
+      console.log(chalk.white(`• Token: ${chalk.cyan(tokenInfo.metadata.name)} (${chalk.cyan(tokenInfo.metadata.symbol)})`));
     } else {
-      console.log(chalk.white(`• Mint: ${chalk.cyan(tokenInfo.mint)}`));
+      console.log(chalk.white(`• Address: ${chalk.cyan(tokenInfo.mint)}`));
     }
-    console.log(chalk.white(`• Total Supply: ${chalk.cyan(tokenInfo.supply)}`));
+    
+    // Supply Information
+    const formattedSupply = tokenInfo.supply.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    });
+    console.log(chalk.white(`• Total Supply: ${chalk.cyan(formattedSupply)}`));
     console.log(chalk.white(`• Decimals: ${chalk.cyan(tokenInfo.decimals)}`));
-    console.log(chalk.white(`• Your Balance: ${chalk.cyan(tokenInfo.userBalance || 0)}`));
+    
+    // Authority Information
+    if (tokenInfo.mintAuthority) {
+      console.log(chalk.white(`• Mint Authority: ${chalk.cyan(tokenInfo.mintAuthority)}`));
+    }
+    
+    // User Balance
+    const formattedBalance = tokenInfo.userBalance.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4
+    });
+    console.log(chalk.white(`• Your Balance: ${chalk.cyan(formattedBalance)}`));
+    
+    if (tokenInfo.userTokenAccount) {
+      console.log(chalk.white(`• Your Token Account: ${chalk.cyan(tokenInfo.userTokenAccount)}`));
+    }
     
     // Explorer links
     console.log(chalk.bold.blue("\n🔗 Links:"));
     console.log(chalk.white(`• Explorer: ${chalk.cyan(tokenInfo.urls.explorer)}`));
+    
+    if (tokenInfo.urls.metadata) {
+      console.log(chalk.white(`• Metadata: ${chalk.cyan(tokenInfo.urls.metadata)}`));
+    }
     
     // Save to file option
     if (args.includes('--save')) {
