@@ -1,0 +1,26 @@
+{
+  "name": "solana-token-cli",
+  "version": "1.0.0",
+  "description": "CLI for creating tokens on Solana and integrating with Raydium pools",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "solana",
+    "blockchain",
+    "token",
+    "crypto",
+    "cli",
+    "spl-token"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@solana/web3.js": "^1.88.0",
+    "@solana/spl-token": "^0.3.0",
+    "dotenv": "^16.0.0",
+    "prompts": "^2.4.0"
+  }
+} 
