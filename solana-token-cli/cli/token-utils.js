@@ -1,9 +1,17 @@
-import { connection, loadWallet, getExplorerUrl } from './config.js';
+import { connection, loadWallet, getExplorerUrl, getWalletPath } from './config.js';
 import * as web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
-import { createTokenMetadata } from './metadata-utils.js';
+import { createTokenWithUmi } from './umi-token-creator.js';
 
-export async function createToken({ name, symbol, decimals, initialSupply, imageUrl, twitterUrl, telegramUrl }, simulate = false) {
+export async function createToken({ name, symbol, decimals, initialSupply, imageUrl, twitterUrl, telegramUrl, useUmi = true }, simulate = false) {
+  // If we're using the pure Umi approach, redirect to the new implementation
+  if (useUmi && useUmi === 'pure') {
+    console.log('Using pure Umi approach for token creation and metadata...');
+    return createTokenWithUmi({ 
+      name, symbol, decimals, initialSupply, imageUrl, twitterUrl, telegramUrl 
+    }, getWalletPath(), simulate);
+  }
+
   const wallet = loadWallet();
   console.log(`Creating token with ${decimals} decimals and initial supply of ${initialSupply}...`);
   if (imageUrl) console.log(`Token image URL: ${imageUrl}`);
@@ -30,10 +38,7 @@ export async function createToken({ name, symbol, decimals, initialSupply, image
       const txId = 'Simulated' + Math.random().toString(36).substring(2, 15);
       console.log(`Simulated tokens minted successfully! Transaction ID: ${txId}`);
       
-      // Simulate metadata creation
-      console.log('Simulating metadata creation...');
-      const metadataResult = await createTokenMetadata({ name, symbol, imageUrl, twitterUrl, telegramUrl }, mint, true);
-      
+      // For simulation, we'll just return simulated values without metadata
       return {
         mint: mintKeypair.publicKey,
         tokenAccount: tokenAccount,
@@ -46,14 +51,15 @@ export async function createToken({ name, symbol, decimals, initialSupply, image
           imageUrl: imageUrl || '',
           twitterUrl: twitterUrl || '',
           telegramUrl: telegramUrl || '',
-          metadataAddress: metadataResult.metadataAddress,
-          metadataTransaction: metadataResult.signature,
-          metadataSuccess: true
+          metadataAddress: web3.Keypair.generate().publicKey.toBase58(),
+          metadataTransaction: txId,
+          metadataSuccess: true,
+          metadataUmi: true
         },
         urls: {
           mint: getExplorerUrl(mint.toBase58()),
           transaction: getExplorerUrl(txId, 'tx'),
-          metadataTransaction: metadataResult.signature ? getExplorerUrl(metadataResult.signature, 'tx') : null
+          metadataTransaction: getExplorerUrl(txId, 'tx')
         },
         simulated: true
       };
@@ -151,22 +157,10 @@ export async function createToken({ name, symbol, decimals, initialSupply, image
       console.log(`Transaction ID: ${txId}`);
       console.log(`Explorer URL: ${getExplorerUrl(mintKeypair.publicKey.toBase58())}`);
       
-      // Step 11: Create token metadata to make it appear in explorers
-      console.log('\nNow creating token metadata so it appears correctly in explorers...');
-      const metadataResult = await createTokenMetadata(
-        { name, symbol, imageUrl, twitterUrl, telegramUrl }, 
-        mintKeypair.publicKey,
-        false
-      );
-      
-      // Return comprehensive information with metadata result status
-      const metadataSuccess = metadataResult.success === true;
-      const metadataUrls = metadataSuccess 
-        ? { metadataTransaction: getExplorerUrl(metadataResult.signature, 'tx') }
-        : {};
-        
-      // Build error message if metadata creation failed
-      const metadataError = metadataSuccess ? undefined : metadataResult.error;
+      // When using the legacy approach without Umi, we don't create token metadata
+      // Return a response without metadata
+      console.log('\nNOTE: Using legacy SPL token creation without metadata.');
+      console.log('Your token will not have metadata and will appear as its address in explorers.');
       
       return {
         mint: mintKeypair.publicKey,
@@ -180,15 +174,15 @@ export async function createToken({ name, symbol, decimals, initialSupply, image
           imageUrl: imageUrl || '',
           twitterUrl: twitterUrl || '',
           telegramUrl: telegramUrl || '',
-          metadataAddress: metadataResult.metadataAddress,
-          metadataTransaction: metadataResult.signature,
-          metadataSuccess: metadataSuccess,
-          metadataError: metadataError
+          metadataAddress: null,
+          metadataTransaction: null,
+          metadataSuccess: false,
+          metadataError: 'Legacy SPL token creation does not include metadata',
+          metadataUmi: false
         },
         urls: {
           mint: getExplorerUrl(mintKeypair.publicKey.toBase58()),
           transaction: getExplorerUrl(txId, 'tx'),
-          ...metadataUrls
         },
         simulated: false
       };

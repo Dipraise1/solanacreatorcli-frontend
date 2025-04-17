@@ -35,6 +35,11 @@ export function loadWallet() {
   }
 }
 
+// Get the wallet path for Umi
+export function getWalletPath() {
+  return WALLET_PATH;
+}
+
 // Get the Solana Explorer URL based on the network
 export function getExplorerUrl(address, type = 'address') {
   const baseUrl = 'https://explorer.solana.com';
